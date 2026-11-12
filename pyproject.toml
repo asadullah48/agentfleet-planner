@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentfleet-planner"
+version = "0.1.0"
+description = "Offline desired-state and capacity planning for agent worker pools"
+requires-python = ">=3.10"
+authors = [{name = "Asadullah Shafique"}]
+readme = "README.md"
+license = {text = "MIT"}
+dependencies = []
+
+[project.scripts]
+agentfleet = "agentfleet.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agentfleet*"]

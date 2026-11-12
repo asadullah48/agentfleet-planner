@@ -1,0 +1,11 @@
+{
+  "nodes": [
+    {"name": "cpu-01", "ready": true, "capacity": {"cpu": 8, "memory_mib": 16384, "gpu": 0}},
+    {"name": "gpu-01", "ready": true, "capacity": {"cpu": 8, "memory_mib": 32768, "gpu": 1}}
+  ],
+  "pools": [
+    {"name": "api-workers", "replicas": 2, "request": {"cpu": 2, "memory_mib": 2048, "gpu": 0}},
+    {"name": "model-workers", "replicas": 2, "request": {"cpu": 4, "memory_mib": 8192, "gpu": 1}}
+  ],
+  "workers": []
+}
