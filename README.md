@@ -6,6 +6,7 @@
 
 Offline desired-state planning for agent infrastructure.
 
+[![CI](https://github.com/asadullah48/agentfleet-planner/actions/workflows/test.yml/badge.svg)](https://github.com/asadullah48/agentfleet-planner/actions/workflows/test.yml)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![Version](https://img.shields.io/badge/version-0.1.0-0f766e?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-475569?style=flat-square)

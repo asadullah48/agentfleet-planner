@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/asadullah48/agentfleet-planner/snapshot.schema.json",
+  "title": "AgentFleet snapshot",
+  "description": "Shape only. Unique names, references, and existing overcommit are checked by agentfleet.planner.validate.",
+  "type": "object",
+  "required": ["nodes", "pools", "workers"],
+  "additionalProperties": false,
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "ready", "capacity"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"$ref": "#/$defs/name"},
+          "ready": {"type": "boolean"},
+          "capacity": {"$ref": "#/$defs/resources"}
+        }
+      }
+    },
+    "pools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "replicas", "request"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"$ref": "#/$defs/name"},
+          "replicas": {"type": "integer", "minimum": 0},
+          "request": {"$ref": "#/$defs/resources"}
+        }
+      }
+    },
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "pool", "node", "request"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"$ref": "#/$defs/name"},
+          "pool": {"$ref": "#/$defs/name"},
+          "node": {"$ref": "#/$defs/name"},
+          "request": {"$ref": "#/$defs/resources"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "\\S"},
+    "resources": {
+      "type": "object",
+      "required": ["cpu", "memory_mib", "gpu"],
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {"type": "integer", "minimum": 1},
+        "memory_mib": {"type": "integer", "minimum": 1},
+        "gpu": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

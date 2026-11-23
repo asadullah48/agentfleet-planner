@@ -1,83 +1,86 @@
 """Validated snapshots and deterministic, non-mutating placement plans."""
 
+import json
+import re
 from copy import deepcopy
+from pathlib import Path
 
 RESOURCES = ("cpu", "memory_mib", "gpu")
+SCHEMA = json.loads(Path(__file__).with_name("snapshot.schema.json").read_text(encoding="utf-8"))
+_TYPES = {"object": dict, "array": list, "string": str, "boolean": bool, "integer": int}
 
 
-def _integer(value, label, minimum=0):
-    if type(value) is not int or value < minimum:
-        raise ValueError(f"{label} must be an integer >= {minimum}")
-
-
-def _name(value, label):
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label} must be a non-empty string")
-
-
-def _resources(value, label):
-    if not isinstance(value, dict) or set(value) != set(RESOURCES):
-        raise ValueError(f"{label} must contain exactly {RESOURCES}")
-    for resource in RESOURCES:
-        _integer(value[resource], f"{label}.{resource}")
-    if value["cpu"] == 0 or value["memory_mib"] == 0:
-        raise ValueError(f"{label}: cpu and memory_mib must be positive")
+def _check(value, schema, path):
+    """Apply the subset of JSON Schema used by snapshot.schema.json (stdlib only)."""
+    if "$ref" in schema:
+        schema = SCHEMA["$defs"][schema["$ref"].rsplit("/", 1)[1]]
+    kind = schema.get("type")
+    # bool is an int subclass in Python, but not a JSON integer.
+    if kind and (not isinstance(value, _TYPES[kind]) or (kind == "integer" and isinstance(value, bool))):
+        raise ValueError(f"{path}: expected {kind}, got {type(value).__name__} {value!r}")
+    if "minimum" in schema and value < schema["minimum"]:
+        raise ValueError(f"{path}: must be >= {schema['minimum']}, got {value}")
+    if "pattern" in schema and not re.search(schema["pattern"], value):
+        raise ValueError(f"{path}: must match pattern {schema['pattern']!r}, got {value!r}")
+    if kind == "object":
+        missing = [key for key in schema.get("required", []) if key not in value]
+        if missing:
+            raise ValueError(f"{path}: missing required field(s): {', '.join(missing)}")
+        if schema.get("additionalProperties") is False:
+            unknown = sorted(set(value) - set(schema["properties"]))
+            if unknown:
+                raise ValueError(f"{path}: unknown field(s): {', '.join(map(str, unknown))}")
+        for key, sub in schema.get("properties", {}).items():
+            if key in value:
+                _check(value[key], sub, f"{path}.{key}")
+    if kind == "array":
+        for index, item in enumerate(value):
+            _check(item, schema["items"], f"{path}[{index}]")
 
 
 def validate(snapshot):
-    """Reject invalid, ambiguous or already overcommitted snapshots."""
-    if not isinstance(snapshot, dict) or set(snapshot) != {"nodes", "pools", "workers"}:
-        raise ValueError("snapshot must contain exactly nodes, pools, workers")
+    """Check the schema, then unique names, references, and existing overcommit."""
+    _check(snapshot, SCHEMA, "$")
     for kind in ("nodes", "pools", "workers"):
-        if not isinstance(snapshot[kind], list):
-            raise ValueError(f"{kind} must be a list")
-        names = set()
-        for item in snapshot[kind]:
-            if not isinstance(item, dict):
-                raise ValueError(f"{kind} entries must be objects")
-            _name(item.get("name"), f"{kind}.name")
-            if item["name"] in names:
-                raise ValueError(f"duplicate {kind} name: {item['name']}")
-            names.add(item["name"])
+        seen = set()
+        for index, item in enumerate(snapshot[kind]):
+            if item["name"] in seen:
+                raise ValueError(f"$.{kind}[{index}].name: duplicate name {item['name']!r}")
+            seen.add(item["name"])
     nodes = {n["name"]: n for n in snapshot["nodes"]}
-    pools = {p["name"]: p for p in snapshot["pools"]}
-    for node in nodes.values():
-        if set(node) != {"name", "ready", "capacity"} or type(node["ready"]) is not bool:
-            raise ValueError("node requires name, boolean ready, capacity")
-        _resources(node["capacity"], "node.capacity")
-    for pool in pools.values():
-        if set(pool) != {"name", "replicas", "request"}:
-            raise ValueError("pool requires name, replicas, request")
-        _integer(pool["replicas"], "pool.replicas")
-        _resources(pool["request"], "pool.request")
+    pools = {p["name"] for p in snapshot["pools"]}
     used = {name: dict.fromkeys(RESOURCES, 0) for name in nodes}
-    for worker in snapshot["workers"]:
-        if set(worker) != {"name", "pool", "node", "request"}:
-            raise ValueError("worker requires name, pool, node, request")
-        _name(worker["pool"], "worker.pool")
-        _name(worker["node"], "worker.node")
-        if worker["pool"] not in pools or worker["node"] not in nodes:
-            raise ValueError(f"worker {worker['name']} references unknown pool or node")
-        _resources(worker["request"], "worker.request")
-        for resource in RESOURCES:
-            used[worker["node"]][resource] += worker["request"][resource]
-    for name in nodes:
-        if any(used[name][r] > nodes[name]["capacity"][r] for r in RESOURCES):
-            raise ValueError(f"node {name} is already over capacity")
+    for index, worker in enumerate(snapshot["workers"]):
+        for field, known in (("pool", pools), ("node", nodes)):
+            if worker[field] not in known:
+                raise ValueError(f"$.workers[{index}].{field}: unknown {field} {worker[field]!r}")
+        for r in RESOURCES:
+            used[worker["node"]][r] += worker["request"][r]
+    for name, node in nodes.items():
+        over = [r for r in RESOURCES if used[name][r] > node["capacity"][r]]
+        if over:
+            raise ValueError(f"node {name!r} is already over capacity on {', '.join(over)}")
 
 
-def plan(snapshot):
+def plan(snapshot, trace=None):
     """Plan releases, then first-fit placements; never execute the actions.
 
     Pool/node/worker sorting makes results independent of input list ordering.
     A resource-drifted worker or worker on an unready node is replaced.
+    If `trace` is a list, one decision record per keep/release/place/shortfall is appended.
     """
     validate(snapshot)
+
+    def record(item):
+        if trace is not None:
+            trace.append(deepcopy(item))  # never alias snapshot objects into the trace
+
     nodes = {n["name"]: n for n in sorted(snapshot["nodes"], key=lambda n: n["name"])}
     pools = sorted(snapshot["pools"], key=lambda p: p["name"])
     free = {name: deepcopy(node["capacity"]) for name, node in nodes.items()}
-    actions, blocked = [], []
-    kept = {p["name"]: [] for p in pools}
+    actions: list[dict] = []
+    blocked: list[dict] = []
+    kept: dict[str, list[dict]] = {p["name"]: [] for p in pools}
     names = {w["name"] for w in snapshot["workers"]}
     for pool in pools:
         workers = sorted((w for w in snapshot["workers"] if w["pool"] == pool["name"]), key=lambda w: w["name"])
@@ -89,19 +92,36 @@ def plan(snapshot):
                 reason = "resource_drift"
             elif len(kept[pool["name"]]) >= pool["replicas"]:
                 reason = "excess_replica"
+            base = {"worker": worker["name"], "pool": pool["name"], "node": worker["node"]}
             if reason:
-                actions.append({"action": "release", "worker": worker["name"], "pool": pool["name"], "node": worker["node"], "reason": reason})
+                actions.append({"action": "release", **base, "reason": reason})
+                record({"decision": "release", **base, "reason": reason, "observed": worker["request"], "desired": pool["request"]})
             else:
                 kept[pool["name"]].append(worker)
+                record({"decision": "keep", **base, "reason": "healthy_match"})
                 for r in RESOURCES:
                     free[worker["node"]][r] -= worker["request"][r]
+
+    def rejection(name, request):
+        if not nodes[name]["ready"]:
+            return {"node": name, "reason": "node_unready"}
+        short = {r: {"need": request[r], "free": free[name][r]} for r in RESOURCES if free[name][r] < request[r]}
+        return {"node": name, "reason": "insufficient_capacity", "short": short} if short else None
+
     # Releases above are assumed successful for planning purposes only.
     for pool in pools:
         missing = pool["replicas"] - len(kept[pool["name"]])
-        for _ in range(missing):
-            chosen = next((name for name, node in nodes.items() if node["ready"] and all(free[name][r] >= pool["request"][r] for r in RESOURCES)), None)
+        while missing:
+            rejected, chosen = [], None
+            for name in nodes:
+                why = rejection(name, pool["request"])
+                if why is None:
+                    chosen = name
+                    break
+                rejected.append(why)
             if chosen is None:
                 blocked.append({"pool": pool["name"], "missing_replicas": missing, "reason": "insufficient_ready_capacity", "request": deepcopy(pool["request"])})
+                record({"decision": "shortfall", "pool": pool["name"], "missing_replicas": missing, "request": pool["request"], "rejected_nodes": rejected})
                 break
             index = 1
             while f"{pool['name']}-{index}" in names:
@@ -109,6 +129,7 @@ def plan(snapshot):
             worker_name = f"{pool['name']}-{index}"
             names.add(worker_name)
             actions.append({"action": "place", "worker": worker_name, "pool": pool["name"], "node": chosen, "request": deepcopy(pool["request"])})
+            record({"decision": "place", "worker": worker_name, "pool": pool["name"], "node": chosen, "reason": "first_fit", "rejected_nodes": rejected})
             for r in RESOURCES:
                 free[chosen][r] -= pool["request"][r]
             missing -= 1
