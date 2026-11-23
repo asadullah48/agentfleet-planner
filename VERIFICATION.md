@@ -46,6 +46,10 @@ Result: success.
 The README CI badge points to this workflow and showed "CI - passing" on
 2026-11-23.
 
+### Repository settings
+
+Private vulnerability reporting enabled, checked 23 Nov 2026, output seen: enabled:true
+
 ## REPORTED / HISTORICAL
 
 Earlier claims, not re-run on 2026-11-23:
@@ -66,6 +70,3 @@ Earlier claims, not re-run on 2026-11-23:
   no-network test covers the planner function, not any adapter that might act on
   a plan.
 - Only these platforms were checked: Windows locally, and Ubuntu on GitHub Actions.
-- **Private vulnerability reporting:** SECURITY.md asks reporters to use it, but
-  on 2026-11-23 the GitHub API returned `{"enabled": false}` for this repository.
-  Until that setting is on, the reporting route in SECURITY.md does not work.
