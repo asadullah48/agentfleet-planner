@@ -1,45 +1,71 @@
 # Verification
 
-**VERIFIED: 2026-11-23 · implementation commit `0db5971ccbbaf61503fc695ac0e814848e900a9c`.**
+This file is committed **after** the code it describes. The code under test is
+commit `0db5971ccbbaf61503fc695ac0e814848e900a9c`; the later commit `ba14aad`
+changed only this file, and this file's own commit comes after both. No planner
+code changed between `0db5971` and the commit that adds this record.
 
-Environment: Windows 11, Python 3.14. Local checks against the committed tree;
-no production infrastructure.
+## VERIFIED
 
-From the repository root:
+Things run or observed on **2026-11-23**, on a checkout of `main` at `ba14aad`.
+
+### Local run
+
+Environment: Windows 11, Python 3.14.7, ruff 0.15.12, mypy 2.4.1 (run via `uvx`,
+in its own isolated environment).
 
 ```text
-python -X utf8 -m unittest discover -s tests
-Ran 32 tests in 4.423s
-OK
-
-python -m pytest -q
-32 passed, 1771 subtests passed in 5.72s
-
 ruff check .
 All checks passed!
 
 mypy agentfleet
 Success: no issues found in 3 source files
+
+python -m pytest -q
+32 passed, 1771 subtests passed in 3.49s
+
+python -X utf8 -m unittest discover -s tests
+Ran 32 tests in 2.829s
+OK
 ```
 
-The 1,771 subtests are mostly the property test (400 seeded random snapshots,
-checking kept + placed + shortfall == requested replicas per pool) and the
-schema bad-input cases, which are cross-checked against the `jsonschema` library.
+### GitHub Actions
 
-CLI with decision trace:
+Workflow `CI` (`.github/workflows/test.yml`), run `45128178367`, push to `main`,
+commit `ba14aad26f352e07db4f848893f926a3351bb7aa`, 2026-11-23T07:01:49Z.
+Result: success.
 
-```text
-python -X utf8 -m agentfleet.cli examples/fleet.json --trace trace.jsonl
-exit code 1
-trace.jsonl: 4 lines (3 place, 1 shortfall)
-```
+| Job | Result |
+|---|---|
+| lint (ruff + mypy) | success |
+| test (3.10) | success |
+| test (3.12) | success |
+| test (3.14) | success |
+| stdlib-only (no extras, unittest) | success |
 
-Exit code `1` is expected: the synthetic snapshot has no second GPU, so one
-GPU replica is reported as a shortfall, and its trace line lists every
-rejected node with need vs free. No placements were executed.
+The README CI badge points to this workflow and showed "CI - passing" on
+2026-11-23.
 
-Not re-run on this date: the separate-venv wheel install check recorded on
-2026-11-12 for commit `46dd87d`.
+## REPORTED / HISTORICAL
 
-GitHub Actions results are separate from these local results; the new
-lint / matrix / stdlib-only jobs have not yet run on GitHub as of this record.
+Earlier claims, not re-run on 2026-11-23:
+
+- 2026-11-12, commit `46dd87d`: 18 tests passed locally; the wheel was built and
+  installed into a separate venv (created with `--system-site-packages`, so not a
+  fully isolated install), and the installed `agentfleet` entry point produced
+  three placements and one blocked GPU replica on `examples/fleet.json`.
+- Earlier on 2026-11-23, `python -m agentfleet.cli examples/fleet.json --trace`
+  exited with code 1 and wrote 4 trace lines (3 place, 1 shortfall). That run was
+  not repeated for this record.
+
+## NOT CLAIMED
+
+- No production use, no real customers, no real infrastructure. All inputs are
+  synthetic snapshots such as `examples/fleet.json`.
+- The planner proposes placements only; it executes nothing. The no-writes and
+  no-network test covers the planner function, not any adapter that might act on
+  a plan.
+- Only these platforms were checked: Windows locally, and Ubuntu on GitHub Actions.
+- **Private vulnerability reporting:** SECURITY.md asks reporters to use it, but
+  on 2026-11-23 the GitHub API returned `{"enabled": false}` for this repository.
+  Until that setting is on, the reporting route in SECURITY.md does not work.
